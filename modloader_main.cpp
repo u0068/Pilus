@@ -327,10 +327,14 @@ void ModManager::Update()
     while (const std::optional event = window->pollEvent())
     {
         if (event->is<sf::Event::Closed>())
+        {
             window->close();
+
+            SaveModOrder();
+        }
         if (event->is<sf::Event::MouseButtonPressed>())
         {
-            if (modhover != -1)
+            if (modhover != -1 && mods.size() != 0)
             {
                 if (!hovermove)
                 {
@@ -352,6 +356,8 @@ void ModManager::Update()
                             std::swap(mods[modhover], mods[modhover + 1]);
                         }
                     }
+
+                    SaveModOrder();
                 }
             }
             else
@@ -489,6 +495,12 @@ void ModManager::InjectAll()
 
     for (int i = 0; i < mods.size(); i++)
     {
+        if (!mods[i].enabled)
+        {
+            log.append("Encountered disabled mod, skipping...\n");
+            continue;
+        }
+
         std::string dllhold = mods[i].path.string();
         char dllpath[MAX_PATH];
 
@@ -613,7 +625,7 @@ void ParseModInfo(Mod* mod, std::string& log)
 void ModManager::RefreshMods()
 {
     log.append("Refreshing Mods...\n");
-    mods.clear();
+    std::vector<Mod> fmods;
     for (const auto& entry : std::filesystem::directory_iterator(modpath))
     {
         if (entry.is_regular_file())
@@ -626,17 +638,118 @@ void ModManager::RefreshMods()
             nmod.path = entry.path();
             nmod.name = entry.path().filename().stem().string();
 
-            mods.push_back(nmod);
+            fmods.push_back(nmod);
             // relative so we can save
         }
     }
     Render();
 
     // need to do seperate so we can open mod zips
+    for (int i = 0; i < fmods.size(); i++)
+    {
+        ParseModInfo(&fmods[i], log);
+    }
+
+    std::vector<Mod> finalmods;
+
+    // use original mods to preserver save order
+
+    // only keep shared mods in both files
     for (int i = 0; i < mods.size(); i++)
     {
-        ParseModInfo(&mods[i], log);
+        for (int j = 0; j < fmods.size(); j++)
+        {
+            if (mods[i] == fmods[j])
+            {
+                finalmods.push_back(fmods[j]);
+                // retain enabled
+                finalmods[finalmods.size() - 1].enabled = mods[i].enabled;
+            }
+        }
     }
+    // add new mods
+    for (int i = 0; i < fmods.size(); i++)
+    {
+        bool addthismod = true;
+        for (int j = 0; j < finalmods.size(); j++)
+        {
+            if (fmods[i] == finalmods[j])
+            {
+                addthismod = false;
+                break;
+            }
+        }
+        if (addthismod)
+        {
+            finalmods.push_back(fmods[i]);
+        }
+    }
+
+    // replace old mods list with new one
+    mods = finalmods;
+
+    SaveModOrder();
+}
+
+void ModManager::LoadModOrder()
+{
+    // we only need to save the mod paths, and whether its enabled, mod loader can retrieve other info in refresh, and would overwrite anyways
+
+    std::ifstream file("PILUS_MODLOADER.CONFIG");
+
+    if (!file) return; // mod order isn't too important if we cant load it just forget about it
+
+    /*
+    .config format:
+    ---- start of file
+    - num_entries (uint32_t) -- number of mods
+    [
+        - enabled (char) -- bool is enabled
+        - pathlength (uint32_t) -- length of path
+        - path (char[pathlength]) -- path of mod
+
+        (next mod)
+    ]
+    ----- end of file
+    */
+
+    uint32_t num_mods;
+    file.read(reinterpret_cast<char*>(&num_mods), sizeof(uint32_t));
+
+    for (int i = 0; i < num_mods; i++)
+    {
+        Mod nmod;
+        file.read(reinterpret_cast<char*>(&nmod.enabled), sizeof(bool));
+
+        uint32_t pathlength = 0;
+        file.read(reinterpret_cast<char*>(&pathlength), sizeof(uint32_t));
+        std::string path(pathlength, '\0');
+        file.read(&path[0], pathlength);
+        nmod.path = std::filesystem::path(path);
+
+        mods.push_back(nmod);
+    }
+
+    file.close();
+}
+
+void ModManager::SaveModOrder()
+{
+    std::ofstream file("PILUS_MODLOADER.CONFIG");
+
+    if (!file) return; // not exactly important just forget if we can't save
+
+    uint32_t num_mods = mods.size();
+    file.write(reinterpret_cast<char*>(&num_mods), sizeof(uint32_t));
+    for (int i = 0; i < mods.size(); i++)
+    {
+        file.write(reinterpret_cast<char*>(&(mods[i].enabled)), sizeof(bool));
+        uint32_t pathlength = mods[i].path.string().size();
+        file.write(reinterpret_cast<char*>(&pathlength), sizeof(uint32_t));
+        file.write(mods[i].path.string().data(), mods[i].path.string().size());
+    }
+
+    file.close();
 }
 
 bool ModManager::CheckSignificantMouseMovement()
@@ -647,7 +760,7 @@ bool ModManager::CheckSignificantMouseMovement()
     if (mouse.x < 400) // mod list is on left half
     {
         // check for mod its hovering on
-        
+
         // mod visual size is 100 px tall
 
         int hoveridxnoclamp = int(mouse.y - scroll) / 100;
@@ -709,11 +822,11 @@ int main(const int argc, char* argv[])
 {
     sf::RenderWindow window(sf::VideoMode({ 800, 560 }), "Pilus");
 
-    
+
     sf::Font font;
     sf::Text text(font);
-    if (!font.openFromFile("verdana.ttf")) // load verdana if available
-        if (!font.openFromFile("data/CreatoDisplay-Regular.otf")) // try grab from primordialis instead
+    if (!font.openFromFile("data/CreatoDisplay-Regular.otf")) // try grab from primordialis instead
+        if (!font.openFromFile("verdana.ttf")) // load verdana if available
             printf("FAILED TO LOAD FONT\n");
 
     ModManager manager;
@@ -736,9 +849,14 @@ int main(const int argc, char* argv[])
         modpath.string().c_str(),
         FALSE,
         FILE_NOTIFY_CHANGE_FILE_NAME);
-    
+
     manager.modpath = modpath;
-    
+
+    if (std::filesystem::exists("PILUS_MODLOADER.CONFIG"))
+    {
+        manager.LoadModOrder();
+    }
+
     manager.RefreshMods();
     manager.Render();
 

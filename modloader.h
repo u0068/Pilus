@@ -11,6 +11,12 @@ struct Mod
     std::string name = "mod.dll"; // mod name is the filename or whatever is held in info.txt
     std::string author = ""; // default for no info.txt
     std::string description = ""; // default for no info.txt
+
+    bool operator== (Mod& other)
+    {
+        if (std::filesystem::weakly_canonical(path) == std::filesystem::weakly_canonical(other.path)) // path is the only thing that matters
+            return true;
+    }
 };
 
 struct ModManager
@@ -41,6 +47,9 @@ struct ModManager
     void InjectAll();
 
     bool CheckSignificantMouseMovement();
+
+    void SaveModOrder();
+    void LoadModOrder();
 
     void Render();
     void Update();
