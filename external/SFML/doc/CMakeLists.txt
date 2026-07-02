@@ -45,7 +45,7 @@ add_custom_target(doc
                   COMMAND ${CMAKE_COMMAND} -E echo_append "Building API Documentation..."
                   COMMAND Doxygen::doxygen ${CMAKE_CURRENT_BINARY_DIR}/doxyfile
                   COMMAND ${CMAKE_COMMAND} -E echo "Done."
-                  WORKING_DIRECTORY ../../..)
+                  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # setup install rules
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/SFML.tag

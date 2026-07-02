@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <queue>
+#define NOMINMAX
 #include <windows.h>
 #include <TlHelp32.h>
 #include <string>

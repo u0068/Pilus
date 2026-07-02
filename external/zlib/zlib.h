@@ -47,7 +47,6 @@ extern "C" {
 #define ZLIB_VER_MINOR 3
 #define ZLIB_VER_REVISION 2
 #define ZLIB_VER_SUBREVISION 1
-#include <zconf.h>
 
 /*
     The 'zlib' compression library provides in-memory compression and

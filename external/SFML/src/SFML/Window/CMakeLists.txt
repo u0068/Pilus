@@ -163,7 +163,7 @@ elseif(SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
             ${SRCROOT}/NetBSD/JoystickImpl.hpp
         )
     endif()
-    source_group("Unix" FILES ${PLATFORM_SRC})
+    source_group("unix" FILES ${PLATFORM_SRC})
 elseif(SFML_OS_MACOS)
     enable_language(OBJC OBJCXX)
     set(PLATFORM_SRC
@@ -242,7 +242,7 @@ elseif(SFML_OS_IOS)
         ${SRCROOT}/iOS/SFMain.hpp
         ${SRCROOT}/iOS/SFMain.mm
     )
-    source_group("iOS" FILES ${PLATFORM_SRC})
+    source_group("ios" FILES ${PLATFORM_SRC})
 elseif(SFML_OS_ANDROID)
     set(PLATFORM_SRC
         ${SRCROOT}/EGLCheck.cpp
@@ -264,7 +264,7 @@ elseif(SFML_OS_ANDROID)
         ${SRCROOT}/Android/SensorImpl.hpp
         ${SRCROOT}/Android/SensorImpl.cpp
     )
-    source_group("Android" FILES ${PLATFORM_SRC})
+    source_group("android" FILES ${PLATFORM_SRC})
 endif()
 
 # define the sfml-window target

@@ -65,7 +65,7 @@ else()
         )
     endif()
 
-    source_group("Unix" FILES ${PLATFORM_SRC})
+    source_group("unix" FILES ${PLATFORM_SRC})
 endif()
 
 find_package(Threads REQUIRED)
