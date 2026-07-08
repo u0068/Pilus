@@ -14,3 +14,5 @@ add_executable(Pilus modloader_main.cpp modloader.h)
 
 target_link_libraries(Pilus PRIVATE SFML::Graphics)
 target_link_libraries(Pilus PRIVATE MINIZIP::minizipstatic)
+
+add_library(plasmid_api SHARED apidll/api.cpp)
