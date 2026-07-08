@@ -16,6 +16,7 @@ struct Mod
     {
         if (std::filesystem::weakly_canonical(path) == std::filesystem::weakly_canonical(other.path)) // path is the only thing that matters
             return true;
+        return false;
     }
 };
 

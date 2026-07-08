@@ -70,6 +70,7 @@ bool IsDLL(const std::string& filePath, std::string& log)
     return (ntHeaders.FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
 }
 
+
 bool isZip(const std::string& filePath, std::string& log) {
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open()) {
@@ -84,6 +85,114 @@ bool isZip(const std::string& filePath, std::string& log) {
     return buffer[0] == 0x50 && buffer[1] == 0x4B && buffer[2] == 0x03 && buffer[3] == 0x04;
 }
 
+bool ReadFileToBuffer(const std::string& path, std::vector<uint8_t>& buffer)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) return false;
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    buffer.resize(size);
+    return file.read(reinterpret_cast<char*>(buffer.data()), size).good();
+}
+
+DWORD RvaToOffset(DWORD rva, IMAGE_NT_HEADERS* nt, uint8_t* data)
+{
+    auto section = IMAGE_FIRST_SECTION(nt);
+
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, section++)
+    {
+        DWORD start = section->VirtualAddress;
+        DWORD size = section->Misc.VirtualSize;
+
+        if (rva >= start && rva < start + size)
+        {
+            return section->PointerToRawData + (rva - start);
+        }
+    }
+
+    return 0;
+}
+
+DWORD GetExportRVA(std::string dllPath, std::string exportName, std::string& log)
+{
+    std::vector<uint8_t> data;
+
+    if (!ReadFileToBuffer(dllPath, data)) {
+        log.append("Failed to read DLL file.\n");
+        return 0;
+    }
+
+    auto dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(data.data());
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
+        log.append("Invalid DOS signature.\n");
+        return 0;
+    }
+
+    auto ntHeader = reinterpret_cast<IMAGE_NT_HEADERS*>(
+        data.data() + dosHeader->e_lfanew);
+
+    if (ntHeader->Signature != IMAGE_NT_SIGNATURE) {
+        log.append("Invalid NT signature.\n");
+        return 0;
+    }
+
+    auto& exportDirData =
+        ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+
+    if (exportDirData.VirtualAddress == 0) {
+        log.append("No export table found.\n");
+        return 0;
+    }
+
+    DWORD exportDirOffset = RvaToOffset(exportDirData.VirtualAddress, ntHeader, data.data());
+    if (!exportDirOffset || exportDirOffset >= data.size()) {
+        log.append("Invalid export directory RVA.\n");
+        return 0;
+    }
+
+    auto exportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(
+        data.data() + exportDirOffset);
+
+    DWORD namesOffset =
+        RvaToOffset(exportDir->AddressOfNames, ntHeader, data.data());
+    DWORD ordinalsOffset =
+        RvaToOffset(exportDir->AddressOfNameOrdinals, ntHeader, data.data());
+    DWORD funcsOffset =
+        RvaToOffset(exportDir->AddressOfFunctions, ntHeader, data.data());
+
+    if (!namesOffset || !ordinalsOffset || !funcsOffset) {
+        log.append("Invalid export tables.\n");
+        return 0;
+    }
+
+    DWORD* nameRVAs = reinterpret_cast<DWORD*>(data.data() + namesOffset);
+    WORD* ordinals = reinterpret_cast<WORD*>(data.data() + ordinalsOffset);
+    DWORD* funcRVAs = reinterpret_cast<DWORD*>(data.data() + funcsOffset);
+
+    for (DWORD i = 0; i < exportDir->NumberOfNames; ++i)
+    {
+        DWORD nameOffset =
+            RvaToOffset(nameRVAs[i], ntHeader, data.data());
+
+        if (!nameOffset || nameOffset >= data.size())
+            continue;
+
+        char* name = reinterpret_cast<char*>(data.data() + nameOffset);
+
+        if (exportName == name)
+        {
+            WORD ordinalIndex = ordinals[i];
+            DWORD rva = funcRVAs[ordinalIndex];
+
+            log.append("Found Ready RVA\n");
+
+            return rva;
+        }
+    }
+
+    log.append("Export not found.\n");
+    return 0;
+}
 
 int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProcessName, std::string& log, std::string& elog)
 {
@@ -163,6 +272,25 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
     }
 
     log.append("DLL Injected !\n");
+
+
+    log.append("Finding READY RVA\n");
+    DWORD readyRVA = GetExportRVA(lpFullDLLPath, "READY", elog);
+    if (readyRVA == 0)
+    {
+        log.append("Failed to find READY RVA, mod will still load. Conflicts may occur !\n");
+        return 0; // do not say failed to load mod because it technically loaded
+    }
+    log.append("READY RVA at 0x");
+    log.append(std::to_string((UINT)readyRVA));
+    log.append("\n");
+    // lppathadress is base adress of where dll was written to primordialis
+    bool* readyfull = reinterpret_cast<bool*>((uintptr_t)lpPathAddress + readyRVA);
+
+    log.append("Waiting for mod to finish loading...\n");
+    while (!&readyfull)
+        Sleep(1);
+    log.append("Mod loaded !\n");
 
     return 0;
 }
