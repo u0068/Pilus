@@ -11,10 +11,7 @@ extern "C" __declspec(dllexport) void GetFunctionAddress(uintptr_t& target, cons
 }
 extern "C" __declspec(dllexport) void UpdateFunctionAddress(uintptr_t n_target, const char* func_name)
 {
-    printf("Updating function to address %i\n", (int)n_target);
     FUNC_DECLS[std::string(func_name)] = n_target - reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-    printf("Updated function to address %i\n", (int)n_target);
-    printf("FUNC_DECLS   = %p\n", &FUNC_DECLS);
 }
 
 extern "C" __declspec(dllexport) bool READY = false;
