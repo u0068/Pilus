@@ -37,6 +37,8 @@ struct ModManager
     bool hoverdown = false;
     bool hovermove = false;
 
+    bool m_leftPressed = false;
+
     bool hoverinject = false;
 
     uint32_t modhover = -1;
