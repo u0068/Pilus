@@ -9,6 +9,13 @@ extern "C" __declspec(dllexport) void GetFunctionAddress(uintptr_t& target, cons
 {
     target = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr)) + FUNC_DECLS.at(func_name);
 }
+extern "C" __declspec(dllexport) void UpdateFunctionAddress(uintptr_t n_target, const char* func_name)
+{
+    printf("Updating function to address %i\n", (int)n_target);
+    FUNC_DECLS[std::string(func_name)] = n_target - reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    printf("Updated function to address %i\n", (int)n_target);
+    printf("FUNC_DECLS   = %p\n", &FUNC_DECLS);
+}
 
 extern "C" __declspec(dllexport) bool READY = false;
 
@@ -113,7 +120,6 @@ void SetFunctionDeclerationAddresses()
     FUNC_DECLS["biome_darkness"] = 0xFD7C0;
     FUNC_DECLS["biome_flow"] = 0xFE190;
     FUNC_DECLS["biome_gen_connector_biome_node_ptr_float_bool"] = 0xFEB80;
-    printf("halfway\n");
     FUNC_DECLS["biome_gen_connector_biome_node_ptr"] = 0xFFF20;
     FUNC_DECLS["biome_gen_demo_end"] = 0xFC2B0;
     FUNC_DECLS["biome_gen_final_boss"] = 0xFBC40;

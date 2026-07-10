@@ -4,6 +4,8 @@
 #include <queue>
 #define NOMINMAX
 #include <windows.h>
+#include <winbase.h>
+#include <psapi.h>
 #include <TlHelp32.h>
 #include <string>
 #include "SFML/Graphics.hpp"
@@ -273,23 +275,69 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
 
     log.append("DLL Injected !\n");
 
+    log.append("DLL Injected !\n");
+
+    WaitForSingleObject(hThreadCreationResult, INFINITE);
+    CloseHandle(hThreadCreationResult);
+
+    std::string dllFileName = lpFullDLLPath;
+    size_t pos = dllFileName.find_last_of("/\\");
+    if (pos != std::string::npos)
+        dllFileName = dllFileName.substr(pos + 1);
+
+    HMODULE remoteModuleBase = nullptr;
+    HMODULE hMods[1024];
+    DWORD cbNeeded;
+    if (EnumProcessModules(hTargetProcess, hMods, sizeof(hMods), &cbNeeded))
+    {
+        for (unsigned int i = 0; i < (cbNeeded / sizeof(HMODULE)); i++)
+        {
+            char modName[MAX_PATH];
+            if (GetModuleBaseNameA(hTargetProcess, hMods[i], modName, sizeof(modName)))
+            {
+                if (lstrcmpiA(modName, dllFileName.c_str()) == 0)
+                {
+                    remoteModuleBase = hMods[i];
+                    break;
+                }
+            }
+        }
+    }
 
     log.append("Finding READY RVA\n");
     DWORD readyRVA = GetExportRVA(lpFullDLLPath, "READY", elog);
     if (readyRVA == 0)
     {
         log.append("Failed to find READY RVA, mod will still load. Conflicts may occur !\n");
-        return 0; // do not say failed to load mod because it technically loaded
+        VirtualFreeEx(hTargetProcess, lpPathAddress, 0, MEM_RELEASE);
+        CloseHandle(hTargetProcess);
+        return 0;
     }
     log.append("READY RVA at 0x");
     log.append(std::to_string((UINT)readyRVA));
     log.append("\n");
-    // lppathadress is base adress of where dll was written to primordialis
-    bool* readyfull = reinterpret_cast<bool*>((uintptr_t)lpPathAddress + readyRVA);
 
-    log.append("Waiting for mod to finish loading...\n");
-    while (!&readyfull)
-        Sleep(1);
+    if (remoteModuleBase)
+    {
+        log.append("Waiting for mod to finish loading...\n");
+        while (true)
+        {
+            bool readyFlag = false;
+            SIZE_T bytesRead;
+            if (ReadProcessMemory(hTargetProcess, (LPCVOID)((uintptr_t)remoteModuleBase + readyRVA), &readyFlag, sizeof(readyFlag), &bytesRead) && bytesRead == sizeof(readyFlag) && readyFlag)
+                break;
+            Sleep(1);
+        }
+        log.append("Mod loaded !\n");
+    }
+    else
+    {
+        log.append("Could not locate injected module, skipping READY wait.\n");
+    }
+
+    VirtualFreeEx(hTargetProcess, lpPathAddress, 0, MEM_RELEASE);
+    CloseHandle(hTargetProcess);
+
     log.append("Mod loaded !\n");
 
     return 0;
@@ -622,8 +670,23 @@ void ModManager::InjectAll()
 
     int failed = 0;
 
+    // try load plasmid api.dll first before all other mods
+    if (std::filesystem::exists("mods/plasmid_api.dll"))
+    {
+       char dllpath[MAX_PATH];
+        if (Inject("mods/plasmid_api.dll", dllpath, lpprocessname, log, log) != 0)
+        {
+            log.append("Failed to inject API, major issues may occur !\n");
+            failed++;
+        }
+    }
+
     for (int i = 0; i < mods.size(); i++)
     {
+        //skip plasmid api in modlist because should be already loaded
+        if (mods[i].path.filename().string() == "plasmid_api.dll")
+            continue;
+
         if (!mods[i].enabled)
         {
             log.append("Encountered disabled mod, skipping...\n");
@@ -949,7 +1012,7 @@ bool ModManager::CheckSignificantMouseMovement()
 
 int main(const int argc, char* argv[])
 {
-    sf::RenderWindow window(sf::VideoMode({ 800, 560 }), "Pilus");
+    sf::RenderWindow window(sf::VideoMode({ 800, 560 }), "Pilus", sf::Style::Titlebar | sf::Style::Close);
 
 
     sf::Font font;
