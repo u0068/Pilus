@@ -350,10 +350,6 @@ std::string WrapText(const sf::Text& text, std::string& string, int max)
     return nstring;
 }
 
-ModManager::ModManager() : scroll(0), modhover(-1), hoverinject(false), hovermove(false), hoverup(false), hoverdown(false), m_leftPressed(false)
-{
-}
-
 void ModManager::Render()
 {
     std::deque<std::string> trunc_log;
