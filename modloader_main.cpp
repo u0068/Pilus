@@ -1,16 +1,19 @@
-#include <iostream>
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#include <string>
+#include <vector>
 #include <fstream>
 #include <sstream>
-#include <queue>
+#include <deque>
+#include <algorithm>
 #define NOMINMAX
 #include <windows.h>
 #include <winbase.h>
+#include <tlhelp32.h>
 #include <psapi.h>
-#include <TlHelp32.h>
-#include <string>
-#include "SFML/Graphics.hpp"
 #include <tchar.h>
-#include <filesystem>
+#include "SFML/Graphics.hpp"
 #include "modloader.h"
 #include "unzip.h"
 
@@ -28,9 +31,7 @@ DWORD GetProcessByName(const char* lpProcessName)
 
     while (Process32Next(hProcList, &ProcList))
     {
-        char* lpCurrentProcessName = ProcList.szExeFile;
-
-        if (lstrcmpA(lpCurrentProcessName, lpProcessName) == 0)
+        if (lstrcmpA(ProcList.szExeFile, lpProcessName) == 0)
             return ProcList.th32ProcessID;
     }
 
@@ -41,14 +42,16 @@ std::filesystem::path GetExePath()
 {
     wchar_t buffer[MAX_PATH];
     DWORD len = GetModuleFileNameW(NULL, buffer, MAX_PATH);
-    if (len == 0) throw std::runtime_error("Failed to get executable path");
+    if (len == 0)
+        throw std::runtime_error("Failed to get executable path");
     return std::filesystem::path(buffer);
 }
 
 bool IsDLL(const std::string& filePath, std::string& log)
 {
-    std::ifstream f(filePath);
-    if (!f.is_open()) {
+    std::ifstream f(filePath, std::ios::binary);
+    if (!f.is_open())
+    {
         log.append("Mod could not be opened\n");
         return false;
     }
@@ -56,33 +59,29 @@ bool IsDLL(const std::string& filePath, std::string& log)
     IMAGE_DOS_HEADER dosHeader{};
     f.read(reinterpret_cast<char*>(&dosHeader), sizeof(dosHeader));
     if (!f || dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
-    {
         return false;
-    }
 
     f.seekg(dosHeader.e_lfanew, std::ios::beg);
     IMAGE_NT_HEADERS ntHeaders{};
     f.read(reinterpret_cast<char*>(&ntHeaders), sizeof(ntHeaders));
-    if (!f || ntHeaders.Signature != IMAGE_NT_SIGNATURE) {
+    if (!f || ntHeaders.Signature != IMAGE_NT_SIGNATURE)
         return false;
-    }
 
     f.close();
-
     return (ntHeaders.FileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
 }
 
-
-bool isZip(const std::string& filePath, std::string& log) {
+bool isZip(const std::string& filePath, std::string& log)
+{
     std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
+    if (!file.is_open())
+    {
         log.append("Failed to open zip\n");
         return false;
     }
 
     unsigned char buffer[4];
     file.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
-
     file.close();
     return buffer[0] == 0x50 && buffer[1] == 0x4B && buffer[2] == 0x03 && buffer[3] == 0x04;
 }
@@ -90,7 +89,8 @@ bool isZip(const std::string& filePath, std::string& log) {
 bool ReadFileToBuffer(const std::string& path, std::vector<uint8_t>& buffer)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return false;
+    if (!file)
+        return false;
     std::streamsize size = file.tellg();
     file.seekg(0, std::ios::beg);
     buffer.resize(size);
@@ -119,50 +119,48 @@ DWORD GetExportRVA(std::string dllPath, std::string exportName, std::string& log
 {
     std::vector<uint8_t> data;
 
-    if (!ReadFileToBuffer(dllPath, data)) {
+    if (!ReadFileToBuffer(dllPath, data))
+    {
         log.append("Failed to read DLL file.\n");
         return 0;
     }
 
     auto dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(data.data());
-    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    {
         log.append("Invalid DOS signature.\n");
         return 0;
     }
 
-    auto ntHeader = reinterpret_cast<IMAGE_NT_HEADERS*>(
-        data.data() + dosHeader->e_lfanew);
-
-    if (ntHeader->Signature != IMAGE_NT_SIGNATURE) {
+    auto ntHeader = reinterpret_cast<IMAGE_NT_HEADERS*>(data.data() + dosHeader->e_lfanew);
+    if (ntHeader->Signature != IMAGE_NT_SIGNATURE)
+    {
         log.append("Invalid NT signature.\n");
         return 0;
     }
 
-    auto& exportDirData =
-        ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-
-    if (exportDirData.VirtualAddress == 0) {
+    auto& exportDirData = ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (exportDirData.VirtualAddress == 0)
+    {
         log.append("No export table found.\n");
         return 0;
     }
 
     DWORD exportDirOffset = RvaToOffset(exportDirData.VirtualAddress, ntHeader, data.data());
-    if (!exportDirOffset || exportDirOffset >= data.size()) {
+    if (!exportDirOffset || exportDirOffset >= data.size())
+    {
         log.append("Invalid export directory RVA.\n");
         return 0;
     }
 
-    auto exportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(
-        data.data() + exportDirOffset);
+    auto exportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(data.data() + exportDirOffset);
 
-    DWORD namesOffset =
-        RvaToOffset(exportDir->AddressOfNames, ntHeader, data.data());
-    DWORD ordinalsOffset =
-        RvaToOffset(exportDir->AddressOfNameOrdinals, ntHeader, data.data());
-    DWORD funcsOffset =
-        RvaToOffset(exportDir->AddressOfFunctions, ntHeader, data.data());
+    DWORD namesOffset = RvaToOffset(exportDir->AddressOfNames, ntHeader, data.data());
+    DWORD ordinalsOffset = RvaToOffset(exportDir->AddressOfNameOrdinals, ntHeader, data.data());
+    DWORD funcsOffset = RvaToOffset(exportDir->AddressOfFunctions, ntHeader, data.data());
 
-    if (!namesOffset || !ordinalsOffset || !funcsOffset) {
+    if (!namesOffset || !ordinalsOffset || !funcsOffset)
+    {
         log.append("Invalid export tables.\n");
         return 0;
     }
@@ -173,21 +171,16 @@ DWORD GetExportRVA(std::string dllPath, std::string exportName, std::string& log
 
     for (DWORD i = 0; i < exportDir->NumberOfNames; ++i)
     {
-        DWORD nameOffset =
-            RvaToOffset(nameRVAs[i], ntHeader, data.data());
-
+        DWORD nameOffset = RvaToOffset(nameRVAs[i], ntHeader, data.data());
         if (!nameOffset || nameOffset >= data.size())
             continue;
 
         char* name = reinterpret_cast<char*>(data.data() + nameOffset);
-
         if (exportName == name)
         {
             WORD ordinalIndex = ordinals[i];
             DWORD rva = funcRVAs[ordinalIndex];
-
             log.append("Found Ready RVA\n");
-
             return rva;
         }
     }
@@ -196,7 +189,7 @@ DWORD GetExportRVA(std::string dllPath, std::string exportName, std::string& log
     return 0;
 }
 
-int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProcessName, std::string& log, std::string& elog)
+int Inject(const char* lpDLLName, char* lpFullDLLPath, const char* lpProcessName, std::string& log, std::string& elog)
 {
     const DWORD dwProcessID = GetProcessByName(lpProcessName);
 
@@ -208,7 +201,7 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
 
     log.append("[DLL Injector]\n");
 
-    const DWORD dwFullPathResult = GetFullPathNameA(lpDLLName, MAX_PATH, const_cast<char*>(lpFullDLLPath), nullptr);
+    const DWORD dwFullPathResult = GetFullPathNameA(lpDLLName, MAX_PATH, lpFullDLLPath, nullptr);
     if (dwFullPathResult == 0)
     {
         elog.append("Attempted to load a missing mod.\n");
@@ -231,7 +224,7 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
     log.append("[PROCESS INJECTION]\n");
     log.append("Process opened successfully.\n");
 
-    const LPVOID lpPathAddress = VirtualAllocEx(hTargetProcess, nullptr, lstrlenA(lpFullDLLPath) + 1, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    const LPVOID lpPathAddress = VirtualAllocEx(hTargetProcess, nullptr, lstrlenA(lpFullDLLPath) + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (lpPathAddress == nullptr)
     {
         elog.append("An error occured when trying to allocate memory in the target process.\n");
@@ -272,8 +265,6 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
         elog.append("An error occured when trying to create the thread in the target process.\n");
         return -1;
     }
-
-    log.append("DLL Injected !\n");
 
     log.append("DLL Injected !\n");
 
@@ -338,34 +329,33 @@ int Inject(const char* lpDLLName, const char* lpFullDLLPath, const char* lpProce
     VirtualFreeEx(hTargetProcess, lpPathAddress, 0, MEM_RELEASE);
     CloseHandle(hTargetProcess);
 
-    log.append("Mod loaded !\n");
-
     return 0;
 }
 
-std::string WrapText(sf::Text text, std::string& string, int max)
+std::string WrapText(const sf::Text& text, std::string& string, int max)
 {
     std::string nstring("");
-    text.setString(nstring);
+    sf::Text temp = text;
+    temp.setString(nstring);
     for (int i = 0; i < string.length(); i++)
     {
         nstring.append(string.substr(i, 1));
-
-        text.setString(nstring);
-        if (text.getLocalBounds().size.x > max)
+        temp.setString(nstring);
+        if (temp.getLocalBounds().size.x > max)
         {
-            nstring.insert(nstring.length()-1, "\n");
+            nstring.insert(nstring.length() - 1, "\n");
         }
-        text.setString(nstring);
+        temp.setString(nstring);
     }
-
     return nstring;
+}
+
+ModManager::ModManager() : scroll(0), modhover(-1), hoverinject(false), hovermove(false), hoverup(false), hoverdown(false), m_leftPressed(false)
+{
 }
 
 void ModManager::Render()
 {
-    // limit log length (prioritise errorlog and last lines)
-
     std::deque<std::string> trunc_log;
 
     int maxlines = 12;
@@ -397,45 +387,42 @@ void ModManager::Render()
     flog = "Pilus Modloader\n" + flog;
     text->setString(flog);
 
-    text->setPosition({400 , 255});
+    text->setPosition({400, 255});
     window->clear(sf::Color::Black);
 
-    // draw text
     window->draw(*text);
 
-    // draw borders
     sf::VertexArray bline(sf::PrimitiveType::Lines, 2);
     bline[0].position = {400, 0};
-    bline[1].position = { 400, 560 };
+    bline[1].position = {400, 560};
 
     window->draw(bline);
 
-    bline[0].position = { 400, 255 };
-    bline[1].position = { 800, 255 };
+    bline[0].position = {400, 255};
+    bline[1].position = {800, 255};
 
     window->draw(bline);
 
-    // draw description/inject
-    if (modhover != -1 && mods.size() != 0)
+    if (modhover != -1 && !mods.empty())
     {
-        if (!sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) // feedback
+        if (!m_leftPressed)
         {
             sf::RectangleShape hoverhighlight;
-            hoverhighlight.setSize({ 399, 100 });
-            hoverhighlight.setPosition({ 0, 100 * modhover + scroll });
+            hoverhighlight.setSize({399, 100});
+            hoverhighlight.setPosition({0, 100 * modhover + scroll});
             hoverhighlight.setFillColor(sf::Color(20, 20, 20));
 
             if (hovermove)
             {
                 if (hoverup)
                 {
-                    hoverhighlight.setSize({ 31, 50 });
-                    hoverhighlight.setPosition({ 400 - 32, 100 * modhover + scroll });
+                    hoverhighlight.setSize({31, 50});
+                    hoverhighlight.setPosition({400 - 32, 100 * modhover + scroll});
                 }
                 if (hoverdown)
                 {
-                    hoverhighlight.setSize({ 31, 50 });
-                    hoverhighlight.setPosition({ 400 - 32, 100 * modhover + scroll + 50 });
+                    hoverhighlight.setSize({31, 50});
+                    hoverhighlight.setPosition({400 - 32, 100 * modhover + scroll + 50});
                 }
             }
             window->draw(hoverhighlight);
@@ -443,26 +430,25 @@ void ModManager::Render()
 
         lastdescriptiontrunc = WrapText(*text, mods[modhover].description, 400);
         text->setString(lastdescriptiontrunc);
-        text->setPosition({ 600 - text->getLocalBounds().size.x / 2, 255 / 2 - text->getLocalBounds().size.y / 2 });
+        text->setPosition({600 - text->getLocalBounds().size.x / 2, 255 / 2 - text->getLocalBounds().size.y / 2});
     }
     else
     {
         if (hoverinject)
         {
             sf::RectangleShape hoverhighlight;
-            hoverhighlight.setSize({ 400, 254 });
-            hoverhighlight.setPosition({ 400, 0 });
+            hoverhighlight.setSize({400, 254});
+            hoverhighlight.setPosition({400, 0});
             hoverhighlight.setFillColor(sf::Color(20, 20, 20));
 
             window->draw(hoverhighlight);
         }
 
         text->setString("Inject");
-        text->setPosition({600 - text->getLocalBounds().size.x/2, 255/2 - text->getLocalBounds().size.y/2});
+        text->setPosition({600 - text->getLocalBounds().size.x / 2, 255 / 2 - text->getLocalBounds().size.y / 2});
     }
     window->draw(*text);
 
-    // render mods
     for (int i = 0; i < mods.size(); i++)
     {
         int mody = i * 100 + int(scroll);
@@ -472,31 +458,30 @@ void ModManager::Render()
             sf::RectangleShape brighterrect;
             brighterrect.setFillColor(sf::Color(255, 255, 255, 10));
             brighterrect.setSize({399, 100});
-            brighterrect.setPosition({ 0, float(mody) });
+            brighterrect.setPosition({0, float(mody)});
             window->draw(brighterrect);
         }
 
-        text->setPosition({ 8, float(mody + 8) });
+        text->setPosition({8, float(mody + 8)});
         text->setString(mods[i].name);
         window->draw(*text);
-        text->setPosition({ 8, float(mody+100-50) });
+        text->setPosition({8, float(mody + 100 - 50)});
         text->setString(mods[i].author);
         text->setFillColor(sf::Color(60, 60, 60));
         window->draw(*text);
         text->setFillColor(sf::Color::White);
 
-        if (!mods[i].enabled) // add darken effect when disabled
+        if (!mods[i].enabled)
         {
             sf::RectangleShape disablerect;
-            disablerect.setSize({ 399, 100 });
-            disablerect.setPosition({ 0, float(mody) });
-            disablerect.setFillColor(sf::Color(0, 0, 0, 150)); // lower opacity
+            disablerect.setSize({399, 100});
+            disablerect.setPosition({0, float(mody)});
+            disablerect.setFillColor(sf::Color(0, 0, 0, 150));
             window->draw(disablerect);
         }
     }
 
     window->display();
-    return;
 }
 
 void ModManager::Update()
@@ -506,12 +491,14 @@ void ModManager::Update()
         if (event->is<sf::Event::Closed>())
         {
             window->close();
-
             SaveModOrder();
         }
         if (event->is<sf::Event::MouseButtonPressed>())
         {
-            if (modhover != -1 && mods.size() != 0)
+            if (event->getIf<sf::Event::MouseButtonPressed>()->button == sf::Mouse::Button::Left)
+                m_leftPressed = true;
+
+            if (modhover != -1 && !mods.empty())
             {
                 if (!hovermove)
                 {
@@ -526,14 +513,13 @@ void ModManager::Update()
                             std::swap(mods[modhover], mods[modhover - 1]);
                         }
                     }
-                    else // hover down
+                    else
                     {
                         if (modhover < mods.size() - 1)
                         {
                             std::swap(mods[modhover], mods[modhover + 1]);
                         }
                     }
-
                     SaveModOrder();
                 }
             }
@@ -543,6 +529,11 @@ void ModManager::Update()
                     InjectAll();
             }
             Render();
+        }
+        if (event->is<sf::Event::MouseButtonReleased>())
+        {
+            if (event->getIf<sf::Event::MouseButtonReleased>()->button == sf::Mouse::Button::Left)
+                m_leftPressed = false;
         }
         if (event->is<sf::Event::KeyPressed>())
         {
@@ -576,27 +567,24 @@ void ModManager::Update()
 
 bool ExtractModFile(std::filesystem::path moddir, unzFile& zip, std::string& elog)
 {
-    char* filename[FILENAME_MAX];
+    char filename[FILENAME_MAX];
     unz_file_info finfo;
 
-    if (unzGetCurrentFileInfo(zip, &finfo, (char*)(filename), FILENAME_MAX, nullptr, 0, nullptr, 0) != UNZ_OK)
+    if (unzGetCurrentFileInfo(zip, &finfo, filename, FILENAME_MAX, nullptr, 0, nullptr, 0) != UNZ_OK)
     {
         elog.append("Failed to get file info\n");
         return false;
     }
     std::string fullPath = moddir.string();
     fullPath.append("/");
-    // will get directory e.g "mods/my_mod/"
-    // this does make conflicts a possible issue but hopefully modmakers just don't use the same names, otherwise will need a mod folder name generation system
-    fullPath.append((char*)(filename));
+    fullPath.append(filename);
 
     size_t dirEnd = fullPath.find_last_of("/\\");
-
     std::string dirPath = fullPath.substr(0, dirEnd);
 
     if (!std::filesystem::exists(dirPath))
     {
-        std::filesystem::create_directory(dirPath);
+        std::filesystem::create_directories(dirPath);
     }
 
     char* buffer = new char[finfo.uncompressed_size];
@@ -604,13 +592,9 @@ bool ExtractModFile(std::filesystem::path moddir, unzFile& zip, std::string& elo
 
     std::ofstream f(fullPath, std::ofstream::binary);
     f.write(buffer, finfo.uncompressed_size);
-
     f.close();
 
-    // when mods get updated all relevant files will just be overwritten, we don't need to worry about deleting old files, user should clear out mods folder whenever wanting to remove mods
-
     delete[] buffer;
-
     return true;
 }
 
@@ -639,18 +623,15 @@ bool UnzipMod(std::string& zippath, std::string& elog)
         {
             elog.append("Failed to extract a file\n");
         }
-        // we'll just continue and hopefully just have skipped some broken file that wasn't needed
-
     } while (unzGoToNextFile(f) == UNZ_OK);
 
     for (const auto& entry : std::filesystem::directory_iterator(moddir))
     {
-        if (std::filesystem::is_regular_file(entry.path())) {
+        if (std::filesystem::is_regular_file(entry.path()))
+        {
             if (lstrcmpA(entry.path().filename().extension().string().c_str(), ".dll") == 0)
             {
                 zippath = entry.path().string();
-                // set zippath to be the extracted dll, then inject that dll normally
-
                 unzClose(f);
                 return true;
             }
@@ -666,7 +647,7 @@ void ModManager::InjectAll()
 {
     log.clear();
     errorlog.clear();
-    char* lpprocessname = "primordialis.exe";
+    const char* lpprocessname = "primordialis.exe";
 
     int failed = 0;
 
@@ -693,13 +674,14 @@ void ModManager::InjectAll()
             continue;
         }
 
-        std::string dllhold = mods[i].path.string();
+        std::string injectPath = mods[i].path.string();
         char dllpath[MAX_PATH];
 
         if (isZip(mods[i].path.string(), log))
         {
             log.append("Unzipping mod...\n");
-            if (!UnzipMod(dllhold, log)) // unzip sets dllhold to be the path of the dll held in the unzipped mod, so we can use that next to actually inject
+            std::string unzippedPath = injectPath;
+            if (!UnzipMod(unzippedPath, errorlog))
             {
                 log.append("[INJECTION FAILED] (");
                 log.append(mods[i].path.filename().string());
@@ -707,21 +689,19 @@ void ModManager::InjectAll()
 
                 Render();
                 failed++;
-
                 continue;
             }
             log.append("Mod unzipped!\n");
+            injectPath = unzippedPath;
         }
-        if (Inject(mods[i].path.string().c_str(), dllpath, lpprocessname, log, log) != 0)
+        if (Inject(injectPath.c_str(), dllpath, lpprocessname, log, errorlog) != 0)
         {
-
             log.append("[INJECTION FAILED] (");
             log.append(mods[i].path.filename().string().c_str());
             log.append(") Skipped\n");
 
             Render();
             failed++;
-
             continue;
         }
 
@@ -738,10 +718,7 @@ void ParseModInfo(Mod* mod, std::string& log)
 {
     if (isZip(mod->path.string(), log))
     {
-        // look for info.txt
         unzFile f = unzOpen(mod->path.string().c_str());
-
-
         if (unzGoToFirstFile(f) != UNZ_OK)
         {
             unzClose(f);
@@ -750,21 +727,20 @@ void ParseModInfo(Mod* mod, std::string& log)
         do
         {
             unz_file_info fileinfo;
-            char* filename[FILENAME_MAX];
-            if (unzGetCurrentFileInfo(f, &fileinfo, (char*)filename, FILENAME_MAX, nullptr, 0, nullptr, 0) == UNZ_OK)
+            char filename[FILENAME_MAX];
+            if (unzGetCurrentFileInfo(f, &fileinfo, filename, FILENAME_MAX, nullptr, 0, nullptr, 0) == UNZ_OK)
             {
-                if (lstrcmpA((char*)filename, "info.txt") == 0)
+                if (lstrcmpA(filename, "info.txt") == 0)
                 {
                     char* data = new char[fileinfo.uncompressed_size];
                     unzOpenCurrentFile(f);
                     unzReadCurrentFile(f, data, fileinfo.uncompressed_size);
 
-                    std::string stringdata(data);
+                    std::string stringdata(data, fileinfo.uncompressed_size);
 
                     size_t find = stringdata.find("name:");
                     if (find != std::string::npos)
                     {
-                        // check if any lines after
                         size_t nextline = stringdata.find("\n", find);
                         if (nextline != std::string::npos)
                         {
@@ -772,13 +748,12 @@ void ParseModInfo(Mod* mod, std::string& log)
                         }
                         else
                         {
-                            mod->name = stringdata.substr(find + 5, stringdata.find("\nend"));
+                            mod->name = stringdata.substr(find + 5, stringdata.find("\nend") - find - 5);
                         }
                     }
                     find = stringdata.find("author:");
                     if (find != std::string::npos)
                     {
-                        // check if any lines after
                         size_t nextline = stringdata.find("\n", find);
                         if (nextline != std::string::npos)
                         {
@@ -786,13 +761,12 @@ void ParseModInfo(Mod* mod, std::string& log)
                         }
                         else
                         {
-                            mod->author = stringdata.substr(find + 7, stringdata.find("\nend"));
+                            mod->author = stringdata.substr(find + 7, stringdata.find("\nend") - find - 7);
                         }
                     }
                     find = stringdata.find("description:");
                     if (find != std::string::npos)
                     {
-                        // check if any lines after
                         size_t nextline = stringdata.find("\n", find);
                         if (nextline != std::string::npos)
                         {
@@ -800,16 +774,14 @@ void ParseModInfo(Mod* mod, std::string& log)
                         }
                         else
                         {
-                            mod->description = stringdata.substr(find + 12, stringdata.find("\nend"));
+                            mod->description = stringdata.substr(find + 12, stringdata.find("\nend") - find - 12);
                         }
                     }
                     delete[] data;
-
                     break;
                 }
             }
         } while (unzGoToNextFile(f) == UNZ_OK);
-
         unzClose(f);
     }
 }
@@ -831,12 +803,10 @@ void ModManager::RefreshMods()
             nmod.name = entry.path().filename().stem().string();
 
             fmods.push_back(nmod);
-            // relative so we can save
         }
     }
     Render();
 
-    // need to do seperate so we can open mod zips
     for (int i = 0; i < fmods.size(); i++)
     {
         ParseModInfo(&fmods[i], log);
@@ -844,9 +814,6 @@ void ModManager::RefreshMods()
 
     std::vector<Mod> finalmods;
 
-    // use original mods to preserver save order
-
-    // only keep shared mods in both files
     for (int i = 0; i < mods.size(); i++)
     {
         for (int j = 0; j < fmods.size(); j++)
@@ -854,12 +821,10 @@ void ModManager::RefreshMods()
             if (mods[i] == fmods[j])
             {
                 finalmods.push_back(fmods[j]);
-                // retain enabled
                 finalmods[finalmods.size() - 1].enabled = mods[i].enabled;
             }
         }
     }
-    // add new mods
     for (int i = 0; i < fmods.size(); i++)
     {
         bool addthismod = true;
@@ -877,33 +842,15 @@ void ModManager::RefreshMods()
         }
     }
 
-    // replace old mods list with new one
     mods = finalmods;
-
     SaveModOrder();
 }
 
 void ModManager::LoadModOrder()
 {
-    // we only need to save the mod paths, and whether its enabled, mod loader can retrieve other info in refresh, and would overwrite anyways
-
     std::ifstream file("PILUS_MODLOADER.CONFIG");
 
-    if (!file) return; // mod order isn't too important if we cant load it just forget about it
-
-    /*
-    .config format:
-    ---- start of file
-    - num_entries (uint32_t) -- number of mods
-    [
-        - enabled (char) -- bool is enabled
-        - pathlength (uint32_t) -- length of path
-        - path (char[pathlength]) -- path of mod
-
-        (next mod)
-    ]
-    ----- end of file
-    */
+    if (!file) return;
 
     uint32_t num_mods;
     file.read(reinterpret_cast<char*>(&num_mods), sizeof(uint32_t));
@@ -929,7 +876,7 @@ void ModManager::SaveModOrder()
 {
     std::ofstream file("PILUS_MODLOADER.CONFIG");
 
-    if (!file) return; // not exactly important just forget if we can't save
+    if (!file) return;
 
     uint32_t num_mods = mods.size();
     file.write(reinterpret_cast<char*>(&num_mods), sizeof(uint32_t));
@@ -949,44 +896,51 @@ bool ModManager::CheckSignificantMouseMovement()
     bool change = false;
     sf::Vector2i mouse = sf::Mouse::getPosition(*window);
 
-    if (mouse.x < 400) // mod list is on left half
+    if (mouse.x < 400)
     {
-        // check for mod its hovering on
-
-        // mod visual size is 100 px tall
-
-        int hoveridxnoclamp = int(mouse.y - scroll) / 100;
-        int hoveridx = std::max(0, std::min(hoveridxnoclamp, (int)mods.size() - 1));
-        if (modhover != hoveridx)
+        if (mods.empty())
         {
-            modhover = hoveridx;
-            change = true;
-        }
-
-        if (mouse.x > 368 && hoveridxnoclamp == hoveridx) // 32 pixels from left boundary is order config
-        {
-            if (!hovermove)
+            if (modhover != -1)
             {
-                hovermove = true;
-                change = true;
-            }
-            if (hoverup != (mouse.y - int(scroll)) % 100 < 50) // top 50 px in 32x100 area
-            {
-                hoverup = !hoverup;
-                change = true;
-            }
-            if (hoverdown == hoverup)
-            {
-                hoverdown = !hoverdown;
+                modhover = -1;
                 change = true;
             }
         }
         else
         {
-            if (hovermove)
+            int hoveridxnoclamp = int(mouse.y - scroll) / 100;
+            int hoveridx = std::max(0, std::min(hoveridxnoclamp, (int)mods.size() - 1));
+            if (modhover != hoveridx)
             {
-                hovermove = false;
+                modhover = hoveridx;
                 change = true;
+            }
+
+            if (mouse.x > 368 && hoveridxnoclamp == hoveridx)
+            {
+                if (!hovermove)
+                {
+                    hovermove = true;
+                    change = true;
+                }
+                if (hoverup != (mouse.y - int(scroll)) % 100 < 50)
+                {
+                    hoverup = !hoverup;
+                    change = true;
+                }
+                if (hoverdown == hoverup)
+                {
+                    hoverdown = !hoverdown;
+                    change = true;
+                }
+            }
+            else
+            {
+                if (hovermove)
+                {
+                    hovermove = false;
+                    change = true;
+                }
             }
         }
     }
@@ -997,8 +951,6 @@ bool ModManager::CheckSignificantMouseMovement()
             modhover = -1;
             change = true;
         }
-
-        // check for inject hover
 
         if (hoverinject != mouse.y < 255)
         {
@@ -1017,8 +969,8 @@ int main(const int argc, char* argv[])
 
     sf::Font font;
     sf::Text text(font);
-    if (!font.openFromFile("data/CreatoDisplay-Regular.otf")) // try grab from primordialis instead
-        if (!font.openFromFile("verdana.ttf")) // load verdana if available
+    if (!font.openFromFile("data/CreatoDisplay-Regular.otf"))
+        if (!font.openFromFile("verdana.ttf"))
             printf("FAILED TO LOAD FONT\n");
 
     ModManager manager;
@@ -1036,11 +988,10 @@ int main(const int argc, char* argv[])
         manager.log.append("Created mod directory\n");
     }
 
-
     HANDLE dirchangenotif = FindFirstChangeNotification(
         modpath.string().c_str(),
-        FALSE,
-        FILE_NOTIFY_CHANGE_FILE_NAME);
+                                                        FALSE,
+                                                        FILE_NOTIFY_CHANGE_FILE_NAME);
 
     manager.modpath = modpath;
 
@@ -1054,20 +1005,16 @@ int main(const int argc, char* argv[])
 
     while (window.isOpen())
     {
-        // check for mods added/deleted to folder
-
-        DWORD updatestatus = WaitForSingleObject(dirchangenotif, 0); // 0ms timeout so we don't interrupt update
+        DWORD updatestatus = WaitForSingleObject(dirchangenotif, 0);
 
         switch (updatestatus)
         {
-        case WAIT_OBJECT_0:
-            manager.log.clear();
-            manager.RefreshMods();
-            FindNextChangeNotification(dirchangenotif);
-            break;
+            case WAIT_OBJECT_0:
+                manager.log.clear();
+                manager.RefreshMods();
+                FindNextChangeNotification(dirchangenotif);
+                break;
         }
-
-        // update windowww
 
         manager.Update();
     }
