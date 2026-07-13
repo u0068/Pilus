@@ -10,7 +10,7 @@ add_subdirectory(external/zlib)
 
 add_subdirectory(external/zlib/contrib/minizip)
 
-add_executable(Pilus modloader_main.cpp modloader.h)
+add_executable(Pilus WIN32 modloader_main.cpp modloader.h)
 
 target_link_libraries(Pilus PRIVATE SFML::Graphics)
 target_link_libraries(Pilus PRIVATE MINIZIP::minizipstatic)

@@ -440,7 +440,8 @@ void ModManager::Render()
             window->draw(hoverhighlight);
         }
 
-        text->setString("Inject");
+        text->setString("Start");
+        // would add a way to check for if primordialis is already open and alternate between Start and Inject but its too slow
         text->setPosition({600 - text->getLocalBounds().size.x / 2, 255 / 2 - text->getLocalBounds().size.y / 2});
     }
     window->draw(*text);
@@ -491,6 +492,8 @@ void ModManager::Update()
         }
         if (event->is<sf::Event::MouseButtonPressed>())
         {
+            CheckSignificantMouseMovement(); // often clicking something in the modloader after not being in focus can trigger wrong button so do this
+
             if (event->getIf<sf::Event::MouseButtonPressed>()->button == sf::Mouse::Button::Left)
                 m_leftPressed = true;
 
@@ -524,6 +527,7 @@ void ModManager::Update()
                 if (hoverinject)
                     InjectAll();
             }
+
             Render();
         }
         if (event->is<sf::Event::MouseButtonReleased>())
@@ -639,13 +643,56 @@ bool UnzipMod(std::string& zippath, std::string& elog)
     return false;
 }
 
+bool IsProcessRunning(const char* processName) {
+    PROCESSENTRY32 entry;
+    entry.dwSize = sizeof(PROCESSENTRY32);
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    if (Process32First(snapshot, &entry)) {
+        do {
+            if (_tcsicmp(entry.szExeFile, processName) == 0) { // Case-insensitive comparison
+                CloseHandle(snapshot);
+                return true;
+            }
+        } while (Process32Next(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return false;
+}
+
 void ModManager::InjectAll()
 {
     log.clear();
     errorlog.clear();
-    const char* lpprocessname = "primordialis.exe";
 
+    constexpr char* lpprocessname = "primordialis.exe";
     int failed = 0;
+
+    // we assume modloader is running inside primordialis working directory
+
+    bool ownProcess = false;
+    STARTUPINFO startI{0};
+    PROCESS_INFORMATION procI{0};
+
+    if (!IsProcessRunning(lpprocessname))
+    {
+        char cmdLine[] = "primordialis.exe --steamless";
+        ownProcess = true;
+        if (!CreateProcessA(NULL, cmdLine, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startI, &procI))
+        {
+            log.append("Failed to start primordialis: ");
+            log.append(std::to_string(GetLastError()));
+            log.append("\n");
+            return;
+        }
+        // try get to work with suspended process in future (for main menu altering mods that might need this)
+        // for now cant do that due to current method of getting the handle of mod dll when injecting
+    }
 
     // try load plasmid api.dll first before all other mods
     if (std::filesystem::exists("mods/plasmid_api.dll"))
@@ -708,6 +755,14 @@ void ModManager::InjectAll()
     else
         log.append("Mod injection finished successfully\n");
     Render();
+
+    if (ownProcess)
+    {
+        //ResumeThread(procI.hThread);
+
+        CloseHandle(procI.hThread);
+        CloseHandle(procI.hProcess);
+    }
 }
 
 void ParseModInfo(Mod* mod, std::string& log)
@@ -958,7 +1013,7 @@ bool ModManager::CheckSignificantMouseMovement()
     return change;
 }
 
-int main(const int argc, char* argv[])
+void run()
 {
     sf::RenderWindow window(sf::VideoMode({ 800, 560 }), "Pilus", sf::Style::Titlebar | sf::Style::Close);
 
@@ -986,8 +1041,8 @@ int main(const int argc, char* argv[])
 
     HANDLE dirchangenotif = FindFirstChangeNotification(
         modpath.string().c_str(),
-                                                        FALSE,
-                                                        FILE_NOTIFY_CHANGE_FILE_NAME);
+        FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME);
 
     manager.modpath = modpath;
 
@@ -1005,13 +1060,27 @@ int main(const int argc, char* argv[])
 
         switch (updatestatus)
         {
-            case WAIT_OBJECT_0:
-                manager.log.clear();
-                manager.RefreshMods();
-                FindNextChangeNotification(dirchangenotif);
-                break;
+        case WAIT_OBJECT_0:
+            manager.log.clear();
+            manager.RefreshMods();
+            FindNextChangeNotification(dirchangenotif);
+            break;
         }
 
         manager.Update();
     }
 }
+
+#ifdef _DEBUG // cmake currently doesnt support debug build sorry ;(
+int main(const int argc, char* argv[])
+{
+    run();
+    return 0;
+}
+#else
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+    LPSTR lpCmdLine, int nCmdShow) {
+    run();
+    return 0;
+}
+#endif
