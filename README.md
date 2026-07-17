@@ -1,5 +1,5 @@
 # Pilus Modloader
-A WIP modloader for Primordialis.
+A WIP modloader for [Plasmid](https://github.com/u0068/Plasmid) C++ and Lua mods
 
 ## AIMS:
 - Make making and loading mods as easy as possible
