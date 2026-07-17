@@ -670,7 +670,7 @@ void ModManager::InjectAll()
     log.clear();
     errorlog.clear();
 
-    constexpr char* lpprocessname = "primordialis.exe";
+    constexpr const char *lpprocessname = "primordialis.exe";
     int failed = 0;
 
     // we assume modloader is running inside primordialis working directory
@@ -1071,16 +1071,8 @@ void run()
     }
 }
 
-#ifdef _DEBUG // cmake currently doesnt support debug build sorry ;(
-int main(const int argc, char* argv[])
-{
-    run();
-    return 0;
-}
-#else
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     LPSTR lpCmdLine, int nCmdShow) {
     run();
     return 0;
 }
-#endif
